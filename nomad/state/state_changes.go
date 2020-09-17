@@ -88,7 +88,14 @@ func (c *changeTrackerDB) WriteTxn(idx uint64) *txn {
 }
 
 func (c *changeTrackerDB) WriteTxnWithCtx(ctx context.Context, idx uint64) *txn {
-	return nil
+	t := &txn{
+		ctx:     ctx,
+		Txn:     c.db.Txn(true),
+		Index:   idx,
+		publish: c.publish,
+	}
+	t.Txn.TrackChanges()
+	return t
 }
 
 func (c *changeTrackerDB) publish(changes Changes) error {
