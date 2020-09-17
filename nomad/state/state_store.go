@@ -741,7 +741,79 @@ func (s *StateStore) ScalingEventsByJob(ws memdb.WatchSet, namespace, jobID stri
 }
 
 func (s *StateStore) UpsertNodeCtx(ctx context.Context, index uint64, node *structs.Node) error {
+	txn := s.db.WriteTxnWithCtx(ctx, index)
+	defer txn.Abort()
 
+	err := s.upsertNodeTxn(txn, index, node)
+	if err != nil {
+		return nil
+	}
+	txn.Commit()
+	return nil
+}
+
+func (s *StateStore) UpsertNode(index uint64, node *structs.Node) error {
+	txn := s.db.WriteTxn(index)
+	defer txn.Abort()
+
+	err := s.upsertNodeTxn(txn, index, node)
+	if err != nil {
+		return nil
+	}
+	txn.Commit()
+	return nil
+}
+
+func (s *StateStore) upsertNodeTxn(txn *txn, index uint64, node *structs.Node) error {
+	// Check if the node already exists
+	existing, err := txn.First("nodes", "id", node.ID)
+	if err != nil {
+		return fmt.Errorf("node lookup failed: %v", err)
+	}
+
+	// Setup the indexes correctly
+	if existing != nil {
+		exist := existing.(*structs.Node)
+		node.CreateIndex = exist.CreateIndex
+		node.ModifyIndex = index
+
+		// Retain node events that have already been set on the node
+		node.Events = exist.Events
+
+		// If we are transitioning from down, record the re-registration
+		if exist.Status == structs.NodeStatusDown && node.Status != structs.NodeStatusDown {
+			appendNodeEvents(index, node, []*structs.NodeEvent{
+				structs.NewNodeEvent().SetSubsystem(structs.NodeEventSubsystemCluster).
+					SetMessage(NodeRegisterEventReregistered).
+					SetTimestamp(time.Unix(node.StatusUpdatedAt, 0))})
+		}
+
+		node.Drain = exist.Drain                                 // Retain the drain mode
+		node.SchedulingEligibility = exist.SchedulingEligibility // Retain the eligibility
+		node.DrainStrategy = exist.DrainStrategy                 // Retain the drain strategy
+	} else {
+		// Because this is the first time the node is being registered, we should
+		// also create a node registration event
+		nodeEvent := structs.NewNodeEvent().SetSubsystem(structs.NodeEventSubsystemCluster).
+			SetMessage(NodeRegisterEventRegistered).
+			SetTimestamp(time.Unix(node.StatusUpdatedAt, 0))
+		node.Events = []*structs.NodeEvent{nodeEvent}
+		node.CreateIndex = index
+		node.ModifyIndex = index
+	}
+
+	// Insert the node
+	if err := txn.Insert("nodes", node); err != nil {
+		return fmt.Errorf("node insert failed: %v", err)
+	}
+	if err := txn.Insert("index", &IndexEntry{"nodes", index}); err != nil {
+		return fmt.Errorf("index update failed: %v", err)
+	}
+	if err := upsertNodeCSIPlugins(txn, node, index); err != nil {
+		return fmt.Errorf("csi plugin update failed: %v", err)
+	}
+
+	return nil
 }
 
 // UpsertNode is used to register a node or update a node definition
