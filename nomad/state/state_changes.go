@@ -1,10 +1,16 @@
 package state
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/stream"
+	"github.com/hashicorp/nomad/nomad/structs"
+)
+
+const (
+	CtxMsgType = "type"
 )
 
 // ReadTxn is implemented by memdb.Txn to perform read operations.
@@ -81,6 +87,10 @@ func (c *changeTrackerDB) WriteTxn(idx uint64) *txn {
 	return t
 }
 
+func (c *changeTrackerDB) WriteTxnWithCtx(ctx context.Context, idx uint64) *txn {
+	return nil
+}
+
 func (c *changeTrackerDB) publish(changes Changes) error {
 	readOnlyTx := c.db.Txn(false)
 	defer readOnlyTx.Abort()
@@ -113,6 +123,7 @@ func (c *changeTrackerDB) WriteTxnRestore() *txn {
 // error. Any errors from the callback would be lost,  which would result in a
 // missing change event, even though the state store had changed.
 type txn struct {
+	ctx context.Context
 	*memdb.Txn
 	// Index in raft where the write is occurring. The value is zero for a
 	// read-only, or WriteTxnRestore transaction.
@@ -144,6 +155,23 @@ func (tx *txn) Commit() error {
 
 	tx.Txn.Commit()
 	return nil
+}
+
+func (tx *txn) MsgType() structs.MessageType {
+	if tx.ctx == nil {
+		return structs.IgnoreUnknownTypeFlag
+	}
+
+	raw := tx.ctx.Value(CtxMsgType)
+	if raw == nil {
+		return structs.IgnoreUnknownTypeFlag
+	}
+
+	msgType, ok := raw.(structs.MessageType)
+	if !ok {
+		return structs.IgnoreUnknownTypeFlag
+	}
+	return msgType
 }
 
 func processDBChanges(tx ReadTxn, changes Changes) ([]stream.Event, error) {

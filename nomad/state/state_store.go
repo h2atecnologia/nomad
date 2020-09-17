@@ -740,6 +740,10 @@ func (s *StateStore) ScalingEventsByJob(ws memdb.WatchSet, namespace, jobID stri
 	return nil, 0, nil
 }
 
+func (s *StateStore) UpsertNodeCtx(ctx context.Context, index uint64, node *structs.Node) error {
+
+}
+
 // UpsertNode is used to register a node or update a node definition
 // This is assumed to be triggered by the client, so we retain the value
 // of drain/eligibility which is set by the scheduler.

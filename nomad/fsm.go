@@ -1,6 +1,7 @@
 package nomad
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -195,7 +196,7 @@ func (n *nomadFSM) Apply(log *raft.Log) interface{} {
 
 	switch msgType {
 	case structs.NodeRegisterRequestType:
-		return n.applyUpsertNode(buf[1:], log.Index)
+		return n.applyUpsertNode(msgType, buf[1:], log.Index)
 	case structs.NodeDeregisterRequestType:
 		return n.applyDeregisterNode(buf[1:], log.Index)
 	case structs.NodeUpdateStatusRequestType:
@@ -310,12 +311,14 @@ func (n *nomadFSM) applyClusterMetadata(buf []byte, index uint64) interface{} {
 	return nil
 }
 
-func (n *nomadFSM) applyUpsertNode(buf []byte, index uint64) interface{} {
+func (n *nomadFSM) applyUpsertNode(reqType structs.MessageType, buf []byte, index uint64) interface{} {
 	defer metrics.MeasureSince([]string{"nomad", "fsm", "register_node"}, time.Now())
 	var req structs.NodeRegisterRequest
 	if err := structs.Decode(buf, &req); err != nil {
 		panic(fmt.Errorf("failed to decode request: %v", err))
 	}
+
+	ctx := context.WithValue(context.Background(), state.CtxMsgType, reqType)
 
 	// Handle upgrade paths
 	req.Node.Canonicalize()
