@@ -323,7 +323,7 @@ func (n *nomadFSM) applyUpsertNode(reqType structs.MessageType, buf []byte, inde
 	// Handle upgrade paths
 	req.Node.Canonicalize()
 
-	if err := n.state.UpsertNode(index, req.Node); err != nil {
+	if err := n.state.UpsertNodeCtx(ctx, index, req.Node); err != nil {
 		n.logger.Error("UpsertNode failed", "error", err)
 		return err
 	}

@@ -27,6 +27,7 @@ type Changes struct {
 	// Index is the latest index at the time these changes were committed.
 	Index   uint64
 	Changes memdb.Changes
+	MsgType structs.MessageType
 }
 
 // changeTrackerDB is a thin wrapper around memdb.DB which enables TrackChanges on
@@ -154,6 +155,7 @@ func (tx *txn) Commit() error {
 		changes := Changes{
 			Index:   tx.Index,
 			Changes: tx.Txn.Changes(),
+			MsgType: tx.MsgType(),
 		}
 		if err := tx.publish(changes); err != nil {
 			return err
@@ -182,6 +184,13 @@ func (tx *txn) MsgType() structs.MessageType {
 }
 
 func processDBChanges(tx ReadTxn, changes Changes) ([]stream.Event, error) {
+	switch changes.MsgType {
+	case structs.IgnoreUnknownTypeFlag:
+		// unknown event type
+		return []stream.Event{}, nil
+	case structs.NodeRegisterRequestType:
+		return NodeRegisterEventFromChanges(tx, changes)
+	}
 	// TODO: add  handlers here.
 	return []stream.Event{}, nil
 }
